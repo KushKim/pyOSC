@@ -32,7 +32,7 @@ class OSCMasterTool(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
-        self.resize(600, 650)
+        self.resize(650, 650)  # 콤보박스 추가로 너비 살짝 확보
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -49,7 +49,7 @@ class OSCMasterTool(QMainWindow):
         lang_layout.addWidget(self.lang_combo)
         main_layout.addLayout(lang_layout)
 
-        # 2. OSC 전송 그룹 (매크로 리스트 및 삭제 기능 포함)
+        # 2. OSC 전송 그룹
         self.send_group = QGroupBox()
         send_layout = QGridLayout()
         self.send_ip_label = QLabel()
@@ -59,11 +59,24 @@ class OSCMasterTool(QMainWindow):
         self.send_addr_label = QLabel()
         self.send_addr_input = QLineEdit()
         self.send_val_label = QLabel()
+
+        # 타입 선택과 값 입력을 나란히 배치하기 위한 레이아웃
+        val_layout = QHBoxLayout()
+        self.send_type_combo = QComboBox()
+        self.send_type_combo.addItems(["Auto", "int", "float", "str", "bool"])
+        self.send_type_combo.setFixedWidth(70)  # 타입 선택 박스는 작게
         self.send_val_input = QLineEdit()
+
+        val_layout.addWidget(self.send_type_combo)
+        val_layout.addWidget(self.send_val_input)
+        val_layout.setContentsMargins(0, 0, 0, 0)
+
+        val_widget = QWidget()
+        val_widget.setLayout(val_layout)
 
         self.add_btn = QPushButton()
         self.msg_list = QListWidget()
-        self.msg_list.setFixedHeight(100)
+        self.msg_list.setFixedHeight(120)
 
         self.delete_sel_btn = QPushButton()
         self.clear_list_btn = QPushButton()
@@ -81,12 +94,11 @@ class OSCMasterTool(QMainWindow):
         send_layout.addWidget(self.send_addr_label, 1, 0)
         send_layout.addWidget(self.send_addr_input, 1, 1)
         send_layout.addWidget(self.send_val_label, 1, 2)
-        send_layout.addWidget(self.send_val_input, 1, 3)
+        send_layout.addWidget(val_widget, 1, 3)  # 합친 위젯 추가
 
         send_layout.addWidget(self.add_btn, 2, 0, 1, 4)
         send_layout.addWidget(self.msg_list, 3, 0, 1, 4)
 
-        # 버튼 3개를 나란히 배치 (비율 조절)
         send_layout.addWidget(self.delete_sel_btn, 4, 0, 1, 1)
         send_layout.addWidget(self.clear_list_btn, 4, 1, 1, 1)
         send_layout.addWidget(self.send_all_btn, 4, 2, 1, 2)
@@ -137,11 +149,17 @@ class OSCMasterTool(QMainWindow):
         self.recv_ip_input.setText(self.config_manager.get("recv_ip"))
         self.recv_port_input.setText(self.config_manager.get("recv_port"))
 
+        # 저장된 타입이 있으면 복원
+        saved_type = self.config_manager.get("send_type")
+        if saved_type:
+            self.send_type_combo.setCurrentText(saved_type)
+
     def save_current_values(self):
         self.config_manager.set("send_ip", self.send_ip_input.text())
         self.config_manager.set("send_port", self.send_port_input.text())
         self.config_manager.set("send_address", self.send_addr_input.text())
         self.config_manager.set("send_value", self.send_val_input.text())
+        self.config_manager.set("send_type", self.send_type_combo.currentText())
         self.config_manager.set("recv_ip", self.recv_ip_input.text())
         self.config_manager.set("recv_port", self.recv_port_input.text())
 
@@ -175,13 +193,14 @@ class OSCMasterTool(QMainWindow):
     def add_to_list(self):
         addr = self.send_addr_input.text().strip()
         val = self.send_val_input.text().strip()
+        vtype = self.send_type_combo.currentText()
 
         if not addr:
             QMessageBox.warning(self, "Warning", "OSC 주소를 입력해주세요.")
             return
 
-        # 체크박스가 있는 아이템으로 생성
-        item = QListWidgetItem(f"{addr} | {val}")
+        # 리스트에 타입 정보까지 포함시켜 저장
+        item = QListWidgetItem(f"{addr} | {val} | {vtype}")
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         item.setCheckState(Qt.CheckState.Unchecked)
 
@@ -189,12 +208,29 @@ class OSCMasterTool(QMainWindow):
         self.save_current_values()
 
     def delete_selected(self):
-        """체크박스가 선택된 아이템들만 삭제합니다."""
-        # 역순으로 지워야 인덱스가 꼬이지 않습니다.
         for i in range(self.msg_list.count() - 1, -1, -1):
             item = self.msg_list.item(i)
             if item.checkState() == Qt.CheckState.Checked:
                 self.msg_list.takeItem(i)
+
+    def parse_value(self, val_str, vtype):
+        """선택된 타입에 맞게 문자열을 파이썬 자료형으로 변환합니다."""
+        if vtype == "int":
+            return int(val_str)
+        elif vtype == "float":
+            return float(val_str)
+        elif vtype == "bool":
+            return val_str.lower() in ("true", "1", "t", "yes", "on")
+        elif vtype == "str":
+            return val_str
+        else:  # Auto (자동 감지)
+            try:
+                if '.' in val_str:
+                    return float(val_str)
+                else:
+                    return int(val_str)
+            except ValueError:
+                return val_str
 
     def send_all_osc(self):
         ip = self.send_ip_input.text()
@@ -213,15 +249,25 @@ class OSCMasterTool(QMainWindow):
 
         for i in range(count):
             item_text = self.msg_list.item(i).text()
-            parts = item_text.split(" | ", 1)
-            if len(parts) == 2:
-                addr, val = parts
+            parts = item_text.split(" | ")
+            if len(parts) >= 2:
+                addr = parts[0]
+                val_str = parts[1]
+                # 하위 호환성 (예전 리스트에는 타입이 없었음)
+                vtype = parts[2] if len(parts) > 2 else "Auto"
+
                 try:
+                    # 타입 캐스팅
+                    val = self.parse_value(val_str, vtype)
+
                     self.osc_client.send(ip, port, addr, val)
-                    self.append_log(f"[SEND {i + 1}/{count}] {addr} | {val}")
+
+                    # 로그에 실제로 변환된 타입 이름(int, float 등)을 표시
+                    type_name = type(val).__name__
+                    self.append_log(f"[SEND {i + 1}/{count}] {addr} | {val} ({type_name})")
                     time.sleep(0.05)
                 except Exception as e:
-                    self.append_log(f"[ERROR] {addr} 전송 실패: {str(e)}")
+                    self.append_log(f"[ERROR] {addr} 전송 실패 (변환 오류 등): {str(e)}")
 
         self.append_log("=== 전송 완료 ===")
 
