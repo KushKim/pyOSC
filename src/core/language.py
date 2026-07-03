@@ -15,7 +15,10 @@ LANG = {
         "send_all": "리스트 순차 전송",
         "clear_list": "전체 지우기",
         "delete_selected": "선택 지우기",
-        "delay": "지연(초)"
+        "delay": "지연(초)",
+        "stop_send": "전송 중지",
+        "save_list": "리스트 저장",
+        "load_list": "리스트 불러오기"
     },
     "en": {
         "send": "OSC Send",
@@ -32,6 +35,9 @@ LANG = {
         "send_all": "Send All Sequentially",
         "clear_list": "Clear All",
         "delete_selected": "Delete Selected",
-        "delay": "Delay(s)"
+        "delay": "Delay(s)",
+        "stop_send": "Stop Sending",
+        "save_list": "Save List",
+        "load_list": "Load List"
     }
 }
