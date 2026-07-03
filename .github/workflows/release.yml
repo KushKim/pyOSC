@@ -5,7 +5,7 @@ on:
   push:
     tags:
       - 'v*' # v1.0.0 같은 태그가 푸시될 때만 실행
-  workflow_dispatch: # GitHub 웹사이트에서 수동으로 버튼을 눌러 실행할 수도 있게 함
+  workflow_dispatch: # 수동 실행
 
 jobs:
   build:
@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, macos-latest] # 윈도우와 맥에서 동시 실행
+        os: [windows-latest, macos-latest]
 
     steps:
     - name: Checkout Code
@@ -33,18 +33,33 @@ jobs:
     - name: Build with PyInstaller
       run: pyinstaller build.spec
 
+    - name: Get Version
+      id: version
+      shell: bash
+      run: |
+        # 태그 푸시인 경우 'v1.2.0' 같은 태그명을 추출, 아니면 'dev'로 설정
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        else
+          echo "VERSION=dev" >> $GITHUB_ENV
+        fi
+
     - name: Prepare Artifacts (Windows)
       if: matrix.os == 'windows-latest'
+      shell: bash
       run: |
-        mkdir release_assets
-        copy dist\OSC_Master_Tool.exe release_assets\OSC_Master_Tool_Windows.exe
+        mkdir -p release_assets
+        # 파일명에 ${{ env.VERSION }} 변수를 삽입합니다
+        cp dist/OSC_Master_Tool.exe release_assets/OSC_Master_Tool_${{ env.VERSION }}_Windows.exe
 
     - name: Prepare Artifacts (macOS)
       if: matrix.os == 'macos-latest'
+      shell: bash
       run: |
-        mkdir release_assets
+        mkdir -p release_assets
         cd dist
-        zip -r ../release_assets/OSC_Master_Tool_macOS.zip OSC_Master_Tool.app
+        # 파일명에 ${{ env.VERSION }} 변수를 삽입합니다
+        zip -r ../release_assets/OSC_Master_Tool_${{ env.VERSION }}_macOS.zip OSC_Master_Tool.app
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
@@ -54,8 +69,8 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build # 빌드가 성공적으로 끝나면 실행
-    if: startsWith(github.ref, 'refs/tags/') # 태그 푸시일 때만 릴리즈 생성
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
