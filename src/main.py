@@ -10,62 +10,8 @@ from PyQt6.QtCore import pyqtSignal
 from pythonosc import udp_client
 from pythonosc import dispatcher
 from pythonosc import osc_server
-
-# --- 🌍 언어팩 데이터 사전 (Language Dictionary) ---
-LANG = {
-    'ko': {
-        'title': 'OSC 마스터 툴 (PyQt6)',
-        'send_group': 'OSC 송출 (Client)',
-        'ip_label': '보낼 IP:',
-        'port_label': '보낼 포트:',
-        'addr_label': 'OSC 주소:',
-        'val_label': '보낼 값 (콤마 구분):',
-        'val_placeholder': '예: 123, 3.14, test',
-        'send_btn': '전송하기',
-        'recv_group': 'OSC 수신 (Server)',
-        'my_ip': 'ℹ️ 내 컴퓨터 IP 주소 (호스트): <b>{ip}</b>',
-        'my_port': '내 수신 포트:',
-        'server_on': '서버 켜기',
-        'server_off': '서버 끄기',
-        'clear_btn': '로그 화면 지우기',
-        'menu_settings': '설정 (Settings)',
-        'menu_credit': '프로그램 정보 (Credits)',
-        'credit_title': '크레딧',
-        'credit_body': '<b>OSC Master Tool v1.1</b><br><br>An OSC communication utility built with Python and PyQt6.<br><br>Made by KushKim 2026',
-        'err_port': "⚠️ [에러] 포트 번호는 숫자만 입력해 주세요.",
-        'err_addr': "⚠️ [에러] OSC 주소는 반드시 '/'로 시작해야 합니다.",
-        'msg_server_started': "✅ 서버 시작됨 (포트: {port} 에서 수신 대기 중...)",
-        'msg_server_failed': "❌ 서버 시작 실패: 해당 포트가 사용 중일 수 있습니다.",
-        'msg_server_stopped': "🛑 서버가 안전하게 종료되었습니다."
-    },
-    'en': {
-        'title': 'OSC Master Tool (PyQt6)',
-        'send_group': 'OSC Send (Client)',
-        'ip_label': 'Target IP:',
-        'port_label': 'Target Port:',
-        'addr_label': 'OSC Address:',
-        'val_label': 'Values (comma separated):',
-        'val_placeholder': 'e.g.: 123, 3.14, test',
-        'send_btn': 'Send',
-        'recv_group': 'OSC Receive (Server)',
-        'my_ip': 'ℹ️ My Local IP Address: <b>{ip}</b>',
-        'my_port': 'Listen Port:',
-        'server_on': 'Start Server',
-        'server_off': 'Stop Server',
-        'clear_btn': 'Clear Log',
-        'menu_settings': 'Settings',
-        'menu_credit': 'About / Credits',
-        'credit_title': 'Credits',
-        'credit_body': '<b>OSC Master Tool v1.1</b><br><br>An OSC communication utility built with Python and PyQt6.<br><br>Made by KushKim 2026',
-        'err_port': "⚠️ [Error] Port must be a valid number.",
-        'err_addr': "⚠️ [Error] OSC Address must start with '/'.",
-        'msg_server_started': "✅ Server started (Listening on port {port}...)",
-        'msg_server_failed': "❌ Server start failed: Port might be in use.",
-        'msg_server_stopped': "🛑 Server has been stopped safely."
-    }
-}
-
-
+from language import LANG
+from version import APP_NAME, VERSION, AUTHOR
 # 기존 QWidget에서 QMainWindow로 변경 (메뉴바 사용을 위해)
 class OSCMasterTool(QMainWindow):
     log_signal = pyqtSignal(str)
@@ -197,7 +143,7 @@ class OSCMasterTool(QMainWindow):
         """현재 언어(self.current_lang)에 맞춰 모든 UI 텍스트를 업데이트"""
         t = LANG[self.current_lang]
 
-        self.setWindowTitle(t['title'])
+        self.setWindowTitle(f"{APP_NAME} v{VERSION}")
         self.menu_settings.setTitle(t['menu_settings'])
         self.action_credit.setText(t['menu_credit'])
 
