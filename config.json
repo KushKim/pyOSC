@@ -1,0 +1,9 @@
+{
+    "language": "ko",
+    "send_ip": "127.0.0.1",
+    "send_port": "5006",
+    "send_address": "/test",
+    "send_value": "1.0",
+    "recv_ip": "127.0.0.1",
+    "recv_port": "5006"
+}

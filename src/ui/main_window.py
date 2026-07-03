@@ -1,255 +1,192 @@
-class OSCMasterTool(QMainWindow):
-    log_signal = pyqtSignal(str)
+# src/ui/main_window.py
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QTextEdit,
+    QGroupBox, QGridLayout, QMessageBox, QComboBox
+)
+from PyQt6.QtCore import pyqtSlot
 
+# UI에 네트워크 코드가 사라지고, 우리가 만든 osc 패키지를 사용합니다.
+from osc.client import OscClient
+from osc.server import OscServer
+from core.language import LANG
+from core.config import ConfigManager
+from version import APP_NAME, VERSION
+
+
+class OSCMasterTool(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.server = None
-        self.server_thread = None
-        self.is_server_running = False
+        self.config_manager = ConfigManager()
+        self.current_lang = self.config_manager.get("language")
 
-        # 현재 언어 설정 (기본값: 한국어)
-        self.current_lang = 'ko'
+        # 분리된 OSC 모듈 초기화
+        self.osc_client = OscClient()
+        self.osc_server = OscServer()
 
-        self.initUI()
-        self.log_signal.connect(self.append_log)
+        self.init_ui()
+        self.load_saved_values()
+        self.apply_language()
 
-    def initUI(self):
-        self.resize(650, 620)
+        # 서버에서 오는 로그 시그널을 UI의 append_log 함수에 연결
+        self.osc_server.log_signal.connect(self.append_log)
 
-        # 1. 메인 위젯 및 레이아웃 설정
+    def init_ui(self):
+        self.setWindowTitle(f"{APP_NAME} v{VERSION}")
+        self.resize(600, 550)
+
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        # 2. 메뉴바 생성 (Settings)
-        menubar = self.menuBar()
-        # 맥(Mac) 환경에서는 메뉴바가 앱 내장이 아닌 화면 상단 시스템 메뉴로 분리되는 것을 방지
-        menubar.setNativeMenuBar(False)
+        # 1. 언어 선택
+        lang_layout = QHBoxLayout()
+        lang_layout.addStretch()
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItems(["한국어", "English"])
+        if self.current_lang == "en":
+            self.lang_combo.setCurrentIndex(1)
+        self.lang_combo.currentIndexChanged.connect(self.change_language)
+        lang_layout.addWidget(self.lang_combo)
+        main_layout.addLayout(lang_layout)
 
-        self.menu_settings = menubar.addMenu("설정 (Settings)")
-
-        # 언어 변경 액션
-        self.action_ko = QAction("한국어 (Korean)", self)
-        self.action_ko.triggered.connect(lambda: self.change_language('ko'))
-        self.menu_settings.addAction(self.action_ko)
-
-        self.action_en = QAction("English", self)
-        self.action_en.triggered.connect(lambda: self.change_language('en'))
-        self.menu_settings.addAction(self.action_en)
-
-        self.menu_settings.addSeparator()  # 메뉴 구분선
-
-        # 크레딧 액션
-        self.action_credit = QAction("프로그램 정보 (Credits)", self)
-        self.action_credit.triggered.connect(self.show_credits)
-        self.menu_settings.addAction(self.action_credit)
-
-        # 3. OSC 송출 (Client) UI
+        # 2. OSC 전송 그룹
         self.send_group = QGroupBox()
         send_layout = QGridLayout()
-
-        self.lbl_send_ip = QLabel()
-        send_layout.addWidget(self.lbl_send_ip, 0, 0)
-        self.ip_entry = QLineEdit("127.0.0.1")
-        send_layout.addWidget(self.ip_entry, 0, 1)
-
-        self.lbl_send_port = QLabel()
-        send_layout.addWidget(self.lbl_send_port, 0, 2)
-        self.port_entry = QLineEdit("5005")
-        send_layout.addWidget(self.port_entry, 0, 3)
-
-        self.lbl_addr = QLabel()
-        send_layout.addWidget(self.lbl_addr, 1, 0)
-        self.addr_entry = QLineEdit("/test/path")
-        send_layout.addWidget(self.addr_entry, 1, 1)
-
-        self.lbl_val = QLabel()
-        send_layout.addWidget(self.lbl_val, 1, 2)
-        self.val_entry = QLineEdit("10, 20.5, hello")
-        send_layout.addWidget(self.val_entry, 1, 3)
-
+        self.send_ip_label = QLabel()
+        self.send_ip_input = QLineEdit()
+        self.send_port_label = QLabel()
+        self.send_port_input = QLineEdit()
+        self.send_addr_label = QLabel()
+        self.send_addr_input = QLineEdit()
+        self.send_val_label = QLabel()
+        self.send_val_input = QLineEdit()
         self.send_btn = QPushButton()
-        self.send_btn.clicked.connect(self.send_msg)
-        send_layout.addWidget(self.send_btn, 0, 4, 2, 1)
+        self.send_btn.clicked.connect(self.send_osc)
 
+        send_layout.addWidget(self.send_ip_label, 0, 0)
+        send_layout.addWidget(self.send_ip_input, 0, 1)
+        send_layout.addWidget(self.send_port_label, 0, 2)
+        send_layout.addWidget(self.send_port_input, 0, 3)
+        send_layout.addWidget(self.send_addr_label, 1, 0)
+        send_layout.addWidget(self.send_addr_input, 1, 1)
+        send_layout.addWidget(self.send_val_label, 1, 2)
+        send_layout.addWidget(self.send_val_input, 1, 3)
+        send_layout.addWidget(self.send_btn, 2, 0, 1, 4)
         self.send_group.setLayout(send_layout)
         main_layout.addWidget(self.send_group)
 
-        # 4. OSC 수신 (Server) UI
+        # 3. OSC 수신 그룹
         self.recv_group = QGroupBox()
-        recv_layout = QVBoxLayout()
+        recv_layout = QGridLayout()
+        self.recv_ip_label = QLabel()
+        self.recv_ip_input = QLineEdit()
+        self.recv_port_label = QLabel()
+        self.recv_port_input = QLineEdit()
+        self.recv_start_btn = QPushButton()
+        self.recv_stop_btn = QPushButton()
+        self.recv_stop_btn.setEnabled(False)
 
-        ip_info_layout = QHBoxLayout()
-        self.local_ip = self.get_local_ip()
-        self.ip_label = QLabel()
-        ip_info_layout.addWidget(self.ip_label)
-        ip_info_layout.addStretch()
-        recv_layout.addLayout(ip_info_layout)
+        self.recv_start_btn.clicked.connect(self.start_server)
+        self.recv_stop_btn.clicked.connect(self.stop_server)
 
-        port_layout = QHBoxLayout()
-        self.lbl_recv_port = QLabel()
-        port_layout.addWidget(self.lbl_recv_port)
-        self.recv_port_entry = QLineEdit("5005")
-        port_layout.addWidget(self.recv_port_entry)
-
-        self.server_toggle_btn = QPushButton()
-        self.server_toggle_btn.clicked.connect(self.toggle_server)
-        port_layout.addWidget(self.server_toggle_btn)
-        port_layout.addStretch()
-        recv_layout.addLayout(port_layout)
-
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        recv_layout.addWidget(self.log_text)
-
-        bottom_layout = QHBoxLayout()
-        bottom_layout.addStretch()
-        self.clear_btn = QPushButton()
-        self.clear_btn.clicked.connect(self.log_text.clear)
-        bottom_layout.addWidget(self.clear_btn)
-        recv_layout.addLayout(bottom_layout)
-
+        recv_layout.addWidget(self.recv_ip_label, 0, 0)
+        recv_layout.addWidget(self.recv_ip_input, 0, 1)
+        recv_layout.addWidget(self.recv_port_label, 0, 2)
+        recv_layout.addWidget(self.recv_port_input, 0, 3)
+        recv_layout.addWidget(self.recv_start_btn, 1, 0, 1, 2)
+        recv_layout.addWidget(self.recv_stop_btn, 1, 2, 1, 2)
         self.recv_group.setLayout(recv_layout)
         main_layout.addWidget(self.recv_group)
 
-        # 5. UI 초기 텍스트 적용 (언어팩 불러오기)
-        self.update_ui_text()
+        # 4. 로그 영역
+        self.log_group = QGroupBox()
+        log_layout = QVBoxLayout()
+        self.log_area = QTextEdit()
+        self.log_area.setReadOnly(True)
+        self.clear_btn = QPushButton()
+        self.clear_btn.clicked.connect(self.log_area.clear)
+        log_layout.addWidget(self.log_area)
+        log_layout.addWidget(self.clear_btn)
+        self.log_group.setLayout(log_layout)
+        main_layout.addWidget(self.log_group)
 
-    # --- 🌍 설정 기능 함수들 ---
+    def load_saved_values(self):
+        self.send_ip_input.setText(self.config_manager.get("send_ip"))
+        self.send_port_input.setText(self.config_manager.get("send_port"))
+        self.send_addr_input.setText(self.config_manager.get("send_address"))
+        self.send_val_input.setText(self.config_manager.get("send_value"))
+        self.recv_ip_input.setText(self.config_manager.get("recv_ip"))
+        self.recv_port_input.setText(self.config_manager.get("recv_port"))
 
-    def change_language(self, lang_code):
-        """언어를 변경하고 화면을 새로고침하는 함수"""
-        if self.current_lang != lang_code:
-            self.current_lang = lang_code
-            self.update_ui_text()
-            self.log_signal.emit(f"🌐 Language changed to: {'Korean' if lang_code == 'ko' else 'English'}")
+    def save_current_values(self):
+        self.config_manager.set("send_ip", self.send_ip_input.text())
+        self.config_manager.set("send_port", self.send_port_input.text())
+        self.config_manager.set("send_address", self.send_addr_input.text())
+        self.config_manager.set("send_value", self.send_val_input.text())
+        self.config_manager.set("recv_ip", self.recv_ip_input.text())
+        self.config_manager.set("recv_port", self.recv_port_input.text())
 
-    def update_ui_text(self):
-        """현재 언어(self.current_lang)에 맞춰 모든 UI 텍스트를 업데이트"""
-        t = LANG[self.current_lang]
+    def apply_language(self):
+        lang = LANG[self.current_lang]
+        self.send_group.setTitle(lang["send"])
+        self.send_ip_label.setText(lang["ip"])
+        self.send_port_label.setText(lang["port"])
+        self.send_addr_label.setText(lang["address"])
+        self.send_val_label.setText(lang["value"])
+        self.send_btn.setText(lang["send"])
 
-        self.setWindowTitle(f"{APP_NAME} v{VERSION}")
-        self.menu_settings.setTitle(t['menu_settings'])
-        self.action_credit.setText(t['menu_credit'])
+        self.recv_group.setTitle(lang["receive"])
+        self.recv_ip_label.setText(lang["ip"])
+        self.recv_port_label.setText(lang["port"])
+        self.recv_start_btn.setText(lang["start"])
+        self.recv_stop_btn.setText(lang["stop"])
 
-        self.send_group.setTitle(t['send_group'])
-        self.lbl_send_ip.setText(t['ip_label'])
-        self.lbl_send_port.setText(t['port_label'])
-        self.lbl_addr.setText(t['addr_label'])
-        self.lbl_val.setText(t['val_label'])
-        self.val_entry.setPlaceholderText(t['val_placeholder'])
-        self.send_btn.setText(t['send_btn'])
+        self.log_group.setTitle(lang["log"])
+        self.clear_btn.setText(lang["clear"])
 
-        self.recv_group.setTitle(t['recv_group'])
-        self.ip_label.setText(t['my_ip'].format(ip=self.local_ip))
-        self.lbl_recv_port.setText(t['my_port'])
-        self.server_toggle_btn.setText(t['server_off'] if self.is_server_running else t['server_on'])
-        self.clear_btn.setText(t['clear_btn'])
+    def change_language(self, index):
+        self.current_lang = "ko" if index == 0 else "en"
+        self.config_manager.set("language", self.current_lang)
+        self.apply_language()
 
-    def show_credits(self):
-        """크레딧 팝업 띄우기"""
-        t = LANG[self.current_lang]
-        QMessageBox.about(self, t['credit_title'], t['credit_body'])
-
-    # --- ⚙️ 기존 통신 핵심 기능들 ---
-
-    def get_local_ip(self):
+    def send_osc(self):
+        ip = self.send_ip_input.text()
+        addr = self.send_addr_input.text()
+        val = self.send_val_input.text()
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
-
-    def parse_input_values(self, text):
-        if not text.strip(): return ""
-        tokens = [t.strip() for t in text.split(',')]
-        parsed_list = []
-        for t in tokens:
-            try:
-                parsed_list.append(int(t)); continue
-            except ValueError:
-                pass
-            try:
-                parsed_list.append(float(t)); continue
-            except ValueError:
-                pass
-            parsed_list.append(t)
-        return parsed_list[0] if len(parsed_list) == 1 else parsed_list
-
-    def send_msg(self):
-        t = LANG[self.current_lang]
-        ip = self.ip_entry.text().strip()
-        address = self.addr_entry.text().strip()
-
-        try:
-            port = int(self.port_entry.text().strip())
-        except ValueError:
-            self.log_signal.emit(t['err_port'])
-            return
-
-        if not address.startswith("/"):
-            self.log_signal.emit(t['err_addr'])
-            return
-
-        value = self.parse_input_values(self.val_entry.text())
-
-        try:
-            client = udp_client.SimpleUDPClient(ip, port)
-            client.send_message(address, value)
-            self.log_signal.emit(f"📤 [{ip}:{port}] {address} -> {value}")
+            port = int(self.send_port_input.text())
+            # 분리된 클라이언트 모듈을 통해 전송
+            self.osc_client.send(ip, port, addr, val)
+            self.append_log(f"[SEND] {ip}:{port} | {addr} | {val}")
+            self.save_current_values()
         except Exception as e:
-            self.log_signal.emit(f"❌ {e}")
-
-    def default_handler(self, address, *args):
-        clean_data = ", ".join(map(str, args))
-        self.log_signal.emit(f"📥 [{address}] : {clean_data}")
-
-    def toggle_server(self):
-        if not self.is_server_running:
-            self.start_server()
-        else:
-            self.stop_server()
+            QMessageBox.warning(self, "Error", f"Failed to send OSC:\n{str(e)}")
 
     def start_server(self):
-        t = LANG[self.current_lang]
+        ip = self.recv_ip_input.text()
         try:
-            port = int(self.recv_port_entry.text().strip())
-        except ValueError:
-            self.log_signal.emit(t['err_port'])
-            return
+            port = int(self.recv_port_input.text())
+            # 분리된 서버 모듈 시작
+            self.osc_server.start(ip, port)
 
-        disp = dispatcher.Dispatcher()
-        disp.set_default_handler(self.default_handler)
-
-        try:
-            self.server = osc_server.ThreadingOSCUDPServer(("0.0.0.0", port), disp)
-            self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-            self.server_thread.start()
-
-            self.is_server_running = True
-            self.log_signal.emit(t['msg_server_started'].format(port=port))
-
-            self.server_toggle_btn.setText(t['server_off'])
-            self.recv_port_entry.setEnabled(False)
-        except Exception:
-            self.log_signal.emit(t['msg_server_failed'])
+            self.recv_start_btn.setEnabled(False)
+            self.recv_stop_btn.setEnabled(True)
+            self.save_current_values()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to start server:\n{str(e)}")
 
     def stop_server(self):
-        t = LANG[self.current_lang]
-        if self.server:
-            self.server.shutdown()
-            self.server.server_close()
+        # 분리된 서버 모듈 종료
+        self.osc_server.stop()
+        self.recv_start_btn.setEnabled(True)
+        self.recv_stop_btn.setEnabled(False)
 
-            self.server = None
-            self.server_thread = None
-            self.is_server_running = False
-            self.log_signal.emit(t['msg_server_stopped'])
+    @pyqtSlot(str)
+    def append_log(self, text):
+        self.log_area.append(text)
 
-            self.server_toggle_btn.setText(t['server_on'])
-            self.recv_port_entry.setEnabled(True)
-
-    def append_log(self, msg):
-        self.log_text.append(msg)
+    def closeEvent(self, event):
+        self.save_current_values()
+        self.stop_server()
+        event.accept()
