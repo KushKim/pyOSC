@@ -1,12 +1,13 @@
 # src/ui/main_window.py
+import time
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit,
-    QGroupBox, QGridLayout, QMessageBox, QComboBox
+    QGroupBox, QGridLayout, QMessageBox, QComboBox, QListWidget,
+    QListWidgetItem
 )
-from PyQt6.QtCore import pyqtSlot
+from PyQt6.QtCore import pyqtSlot, Qt
 
-# UI에 네트워크 코드가 사라지고, 우리가 만든 osc 패키지를 사용합니다.
 from osc.client import OscClient
 from osc.server import OscServer
 from core.language import LANG
@@ -20,7 +21,6 @@ class OSCMasterTool(QMainWindow):
         self.config_manager = ConfigManager()
         self.current_lang = self.config_manager.get("language")
 
-        # 분리된 OSC 모듈 초기화
         self.osc_client = OscClient()
         self.osc_server = OscServer()
 
@@ -28,12 +28,11 @@ class OSCMasterTool(QMainWindow):
         self.load_saved_values()
         self.apply_language()
 
-        # 서버에서 오는 로그 시그널을 UI의 append_log 함수에 연결
         self.osc_server.log_signal.connect(self.append_log)
 
     def init_ui(self):
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
-        self.resize(600, 550)
+        self.resize(600, 650)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -50,7 +49,7 @@ class OSCMasterTool(QMainWindow):
         lang_layout.addWidget(self.lang_combo)
         main_layout.addLayout(lang_layout)
 
-        # 2. OSC 전송 그룹
+        # 2. OSC 전송 그룹 (매크로 리스트 및 삭제 기능 포함)
         self.send_group = QGroupBox()
         send_layout = QGridLayout()
         self.send_ip_label = QLabel()
@@ -61,8 +60,19 @@ class OSCMasterTool(QMainWindow):
         self.send_addr_input = QLineEdit()
         self.send_val_label = QLabel()
         self.send_val_input = QLineEdit()
-        self.send_btn = QPushButton()
-        self.send_btn.clicked.connect(self.send_osc)
+
+        self.add_btn = QPushButton()
+        self.msg_list = QListWidget()
+        self.msg_list.setFixedHeight(100)
+
+        self.delete_sel_btn = QPushButton()
+        self.clear_list_btn = QPushButton()
+        self.send_all_btn = QPushButton()
+
+        self.add_btn.clicked.connect(self.add_to_list)
+        self.delete_sel_btn.clicked.connect(self.delete_selected)
+        self.clear_list_btn.clicked.connect(self.msg_list.clear)
+        self.send_all_btn.clicked.connect(self.send_all_osc)
 
         send_layout.addWidget(self.send_ip_label, 0, 0)
         send_layout.addWidget(self.send_ip_input, 0, 1)
@@ -72,7 +82,15 @@ class OSCMasterTool(QMainWindow):
         send_layout.addWidget(self.send_addr_input, 1, 1)
         send_layout.addWidget(self.send_val_label, 1, 2)
         send_layout.addWidget(self.send_val_input, 1, 3)
-        send_layout.addWidget(self.send_btn, 2, 0, 1, 4)
+
+        send_layout.addWidget(self.add_btn, 2, 0, 1, 4)
+        send_layout.addWidget(self.msg_list, 3, 0, 1, 4)
+
+        # 버튼 3개를 나란히 배치 (비율 조절)
+        send_layout.addWidget(self.delete_sel_btn, 4, 0, 1, 1)
+        send_layout.addWidget(self.clear_list_btn, 4, 1, 1, 1)
+        send_layout.addWidget(self.send_all_btn, 4, 2, 1, 2)
+
         self.send_group.setLayout(send_layout)
         main_layout.addWidget(self.send_group)
 
@@ -134,7 +152,11 @@ class OSCMasterTool(QMainWindow):
         self.send_port_label.setText(lang["port"])
         self.send_addr_label.setText(lang["address"])
         self.send_val_label.setText(lang["value"])
-        self.send_btn.setText(lang["send"])
+
+        self.add_btn.setText(lang["add_list"])
+        self.delete_sel_btn.setText(lang["delete_selected"])
+        self.clear_list_btn.setText(lang["clear_list"])
+        self.send_all_btn.setText(lang["send_all"])
 
         self.recv_group.setTitle(lang["receive"])
         self.recv_ip_label.setText(lang["ip"])
@@ -150,34 +172,72 @@ class OSCMasterTool(QMainWindow):
         self.config_manager.set("language", self.current_lang)
         self.apply_language()
 
-    def send_osc(self):
+    def add_to_list(self):
+        addr = self.send_addr_input.text().strip()
+        val = self.send_val_input.text().strip()
+
+        if not addr:
+            QMessageBox.warning(self, "Warning", "OSC 주소를 입력해주세요.")
+            return
+
+        # 체크박스가 있는 아이템으로 생성
+        item = QListWidgetItem(f"{addr} | {val}")
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(Qt.CheckState.Unchecked)
+
+        self.msg_list.addItem(item)
+        self.save_current_values()
+
+    def delete_selected(self):
+        """체크박스가 선택된 아이템들만 삭제합니다."""
+        # 역순으로 지워야 인덱스가 꼬이지 않습니다.
+        for i in range(self.msg_list.count() - 1, -1, -1):
+            item = self.msg_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                self.msg_list.takeItem(i)
+
+    def send_all_osc(self):
         ip = self.send_ip_input.text()
-        addr = self.send_addr_input.text()
-        val = self.send_val_input.text()
         try:
             port = int(self.send_port_input.text())
-            # 분리된 클라이언트 모듈을 통해 전송
-            self.osc_client.send(ip, port, addr, val)
-            self.append_log(f"[SEND] {ip}:{port} | {addr} | {val}")
-            self.save_current_values()
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to send OSC:\n{str(e)}")
+        except ValueError:
+            QMessageBox.warning(self, "Error", "포트는 숫자여야 합니다.")
+            return
+
+        count = self.msg_list.count()
+        if count == 0:
+            QMessageBox.warning(self, "Warning", "전송할 리스트가 비어있습니다.")
+            return
+
+        self.append_log(f"=== 시작: {count}개의 메시지 연속 전송 ({ip}:{port}) ===")
+
+        for i in range(count):
+            item_text = self.msg_list.item(i).text()
+            parts = item_text.split(" | ", 1)
+            if len(parts) == 2:
+                addr, val = parts
+                try:
+                    self.osc_client.send(ip, port, addr, val)
+                    self.append_log(f"[SEND {i + 1}/{count}] {addr} | {val}")
+                    time.sleep(0.05)
+                except Exception as e:
+                    self.append_log(f"[ERROR] {addr} 전송 실패: {str(e)}")
+
+        self.append_log("=== 전송 완료 ===")
 
     def start_server(self):
         ip = self.recv_ip_input.text()
         try:
             port = int(self.recv_port_input.text())
-            # 분리된 서버 모듈 시작
             self.osc_server.start(ip, port)
 
             self.recv_start_btn.setEnabled(False)
             self.recv_stop_btn.setEnabled(True)
             self.save_current_values()
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to start server:\n{str(e)}")
+            QMessageBox.warning(self, "Error", f"서버 시작 실패:\n{str(e)}")
 
     def stop_server(self):
-        # 분리된 서버 모듈 종료
         self.osc_server.stop()
         self.recv_start_btn.setEnabled(True)
         self.recv_stop_btn.setEnabled(False)
