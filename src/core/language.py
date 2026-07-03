@@ -10,7 +10,10 @@ LANG = {
         "start": "서버 시작",
         "stop": "서버 정지",
         "log": "통신 로그",
-        "clear": "로그 지우기"
+        "clear": "로그 지우기",
+        "add_list": "리스트에 추가",
+        "send_all": "리스트 순차 전송",
+        "clear_list": "리스트 비우기"
     },
     "en": {
         "send": "OSC Send",
@@ -22,6 +25,9 @@ LANG = {
         "start": "Start Server",
         "stop": "Stop Server",
         "log": "Communication Log",
-        "clear": "Clear Log"
+        "clear": "Clear Log",
+        "add_list": "Add to List",
+        "send_all": "Send All Sequentially",
+        "clear_list": "Clear List"
     }
 }
