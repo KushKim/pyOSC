@@ -14,7 +14,8 @@ LANG = {
         "add_list": "리스트에 추가",
         "send_all": "리스트 순차 전송",
         "clear_list": "전체 지우기",
-        "delete_selected": "선택 지우기"
+        "delete_selected": "선택 지우기",
+        "delay": "지연(초)"
     },
     "en": {
         "send": "OSC Send",
@@ -30,6 +31,7 @@ LANG = {
         "add_list": "Add to List",
         "send_all": "Send All Sequentially",
         "clear_list": "Clear All",
-        "delete_selected": "Delete Selected"
+        "delete_selected": "Delete Selected",
+        "delay": "Delay(s)"
     }
 }
