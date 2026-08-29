@@ -1,12 +1,12 @@
 {
     "language": "ko",
-    "send_ip": "192.168.0.242",
+    "send_ip": "192.0.0.2",
     "send_port": "8000",
     "send_address": "/play",
     "send_value": "1",
     "recv_ip": "192.168.0.242",
     "recv_port": "6666",
     "send_type": "float",
-    "send_delay": "2",
-    "send_mode": "concurrent"
+    "send_delay": "0",
+    "send_mode": "sequential"
 }

@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit,
     QGroupBox, QGridLayout, QMessageBox, QComboBox, QListWidget,
-    QListWidgetItem, QFileDialog
+    QListWidgetItem, QFileDialog, QDialog, QDialogButtonBox,
+    QAbstractItemView
 )
 from PyQt6.QtCore import pyqtSlot, Qt, QThread, pyqtSignal
 
@@ -14,8 +15,70 @@ from core.config import ConfigManager
 from version import APP_NAME, VERSION
 
 
+class EditOscItemDialog(QDialog):
+    def __init__(self, item_text, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("OSC 항목 수정")
+        self.setModal(True)
+        self.resize(300, 250)
+
+        layout = QGridLayout(self)
+
+        parts = [p.strip() for p in item_text.split("|")]
+        ip, port, addr, val, vtype, delay = "", "", "", "", "Auto", "0.0"
+
+        try:
+            if len(parts) >= 3 and ":" in parts[0]:
+                ip_port = parts[0]
+                ip, port = ip_port.split(":")
+                addr = parts[1]
+                val = parts[2]
+                if len(parts) > 3: vtype = parts[3]
+                if len(parts) > 4: delay = parts[4]
+            elif len(parts) >= 2:
+                addr = parts[0]
+                val = parts[1]
+                if len(parts) > 2: vtype = parts[2]
+                if len(parts) > 3: delay = parts[3]
+        except Exception:
+            pass
+
+        self.ip_input = QLineEdit(ip)
+        self.port_input = QLineEdit(port)
+        self.addr_input = QLineEdit(addr)
+        self.val_input = QLineEdit(val)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["Auto", "int", "float", "str", "bool"])
+        self.type_combo.setCurrentText(vtype)
+
+        self.delay_input = QLineEdit(delay)
+
+        layout.addWidget(QLabel("IP:"), 0, 0)
+        layout.addWidget(self.ip_input, 0, 1)
+        layout.addWidget(QLabel("Port:"), 1, 0)
+        layout.addWidget(self.port_input, 1, 1)
+        layout.addWidget(QLabel("Address:"), 2, 0)
+        layout.addWidget(self.addr_input, 2, 1)
+        layout.addWidget(QLabel("Value:"), 3, 0)
+        layout.addWidget(self.val_input, 3, 1)
+        layout.addWidget(QLabel("Type:"), 4, 0)
+        layout.addWidget(self.type_combo, 4, 1)
+        layout.addWidget(QLabel("Delay (sec):"), 5, 0)
+        layout.addWidget(self.delay_input, 5, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons, 6, 0, 1, 2)
+
+    def get_result(self):
+        return (f"{self.ip_input.text().strip()}:{self.port_input.text().strip()} | "
+                f"{self.addr_input.text().strip()} | {self.val_input.text().strip()} | "
+                f"{self.type_combo.currentText()} | {self.delay_input.text().strip()}")
+
+
 class OscSendWorker(QThread):
-    """UI 멈춤을 방지하고 동시/순차 전송을 백그라운드에서 처리하는 스레드"""
     log_signal = pyqtSignal(str)
     finished_signal = pyqtSignal()
 
@@ -23,7 +86,7 @@ class OscSendWorker(QThread):
         super().__init__()
         self.osc_client = osc_client
         self.items = items
-        self.mode = mode  # "concurrent" 또는 "sequential"
+        self.mode = mode
         self.main_window = main_window
         self.is_running = True
 
@@ -32,14 +95,11 @@ class OscSendWorker(QThread):
         mode_str = "동시 병렬 전송" if self.mode == "concurrent" else "순차 전송 (개별 Delay 적용)"
         self.log_signal.emit(f"=== 시작: {count}개의 메시지 {mode_str} 준비 ===")
 
-        # 1. 보낼 메시지들 파싱해서 타겟 리스트 생성
         targets = []
         for item_text in self.items:
             parts = item_text.split(" | ")
             try:
-                delay = 0.0  # 기본 딜레이
-
-                # 신규 포맷: IP:Port | 주소 | 값 | 타입 | 딜레이
+                delay = 0.0
                 if len(parts) >= 3 and ":" in parts[0]:
                     ip_port = parts[0]
                     addr = parts[1]
@@ -50,8 +110,6 @@ class OscSendWorker(QThread):
                     ip, port_str = ip_port.split(":")
                     port = int(port_str)
                     delay = float(delay_str)
-
-                # 하위 호환성: 주소 | 값 | 타입 | 딜레이(선택)
                 elif len(parts) >= 2:
                     ip = self.main_window.send_ip_input.text()
                     port = int(self.main_window.send_port_input.text())
@@ -64,9 +122,7 @@ class OscSendWorker(QThread):
                     continue
 
                 val = self.main_window.parse_value(val_str, vtype)
-                # target 데이터에 개별 딜레이(delay) 포함
                 targets.append((ip, port, addr, val, delay))
-
             except Exception as e:
                 self.log_signal.emit(f"[ERROR] 파싱 실패 ({item_text}): {str(e)}")
 
@@ -75,9 +131,7 @@ class OscSendWorker(QThread):
             self.finished_signal.emit()
             return
 
-        # 2. 선택된 모드에 따라 전송 방식 분기
         if self.mode == "concurrent":
-            # 병렬 전송 시에는 딜레이를 제외한 앞의 4개 값만 추출해서 전달
             osc_targets = [(t[0], t[1], t[2], t[3]) for t in targets]
             self.osc_client.send_concurrently(osc_targets)
 
@@ -87,7 +141,6 @@ class OscSendWorker(QThread):
             self.log_signal.emit(f"=== {len(targets)}개의 타겟으로 동시 전송 명령 완료 ===")
 
         elif self.mode == "sequential":
-            # 딜레이를 주며 하나씩 순차 전송
             for i, target in enumerate(targets):
                 if not self.is_running:
                     self.log_signal.emit("=== 전송이 사용자에 의해 중지되었습니다 ===")
@@ -95,7 +148,6 @@ class OscSendWorker(QThread):
 
                 ip, port, addr, val, item_delay = target
 
-                # 메시지 전송
                 self.osc_client.send(ip, port, addr, val)
 
                 type_name = type(val).__name__
@@ -103,15 +155,13 @@ class OscSendWorker(QThread):
                 self.log_signal.emit(
                     f"[SEND {i + 1}/{len(targets)}] {ip}:{port} -> {addr} | {val} ({type_name}){delay_msg}")
 
-                # 항목별 지정된 지연 시간(item_delay) 만큼 대기
                 if item_delay > 0:
                     start_time = time.time()
-                    # 정밀한 대기 시간 계산 및 중지 명령 즉각 감지
                     while (time.time() - start_time) < item_delay and self.is_running:
                         time.sleep(0.01)
 
             if self.is_running:
-                self.log_signal.emit("=== 순차 전송 완료 ===")
+                self.log_signal.emit("=== 전송 완료 ===")
 
         self.finished_signal.emit()
 
@@ -128,6 +178,10 @@ class OSCMasterTool(QMainWindow):
         self.osc_client = OscClient()
         self.osc_server = OscServer()
         self.send_worker = None
+
+        # 실행 중인 전송 버튼의 참조를 저장할 변수
+        self._active_send_btn = None
+        self._inactive_send_btn = None
 
         self.init_ui()
         self.load_saved_values()
@@ -178,13 +232,34 @@ class OSCMasterTool(QMainWindow):
         val_widget = QWidget()
         val_widget.setLayout(val_layout)
 
-        # 개별 딜레이 추가 UI
         self.item_delay_label = QLabel("Delay (sec):")
         self.item_delay_input = QLineEdit("0.0")
 
         self.add_btn = QPushButton()
+
         self.msg_list = QListWidget()
         self.msg_list.setFixedHeight(120)
+        self.msg_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.msg_list.itemDoubleClicked.connect(self.edit_list_item)
+
+        self.move_up_btn = QPushButton("▲")
+        self.move_up_btn.setFixedWidth(30)
+        self.move_down_btn = QPushButton("▼")
+        self.move_down_btn.setFixedWidth(30)
+
+        self.move_up_btn.clicked.connect(self.move_item_up)
+        self.move_down_btn.clicked.connect(self.move_item_down)
+
+        list_container = QWidget()
+        list_h_layout = QHBoxLayout(list_container)
+        list_h_layout.setContentsMargins(0, 0, 0, 0)
+        list_h_layout.addWidget(self.msg_list)
+
+        btn_v_layout = QVBoxLayout()
+        btn_v_layout.addWidget(self.move_up_btn)
+        btn_v_layout.addWidget(self.move_down_btn)
+        btn_v_layout.addStretch()
+        list_h_layout.addLayout(btn_v_layout)
 
         self.delete_sel_btn = QPushButton()
         self.clear_list_btn = QPushButton()
@@ -193,16 +268,21 @@ class OSCMasterTool(QMainWindow):
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["동시 전송 (Concurrent)", "순차 전송 (Sequential)"])
+
+        # 선택 전송 버튼 추가
+        self.send_sel_btn = QPushButton()
         self.send_all_btn = QPushButton()
 
         self.add_btn.clicked.connect(self.add_to_list)
         self.delete_sel_btn.clicked.connect(self.delete_selected)
         self.clear_list_btn.clicked.connect(self.msg_list.clear)
-        self.send_all_btn.clicked.connect(self.send_all_osc)
         self.save_list_btn.clicked.connect(self.save_list_to_file)
         self.load_list_btn.clicked.connect(self.load_list_from_file)
 
-        # 레이아웃 배치 수정
+        # 전송 버튼들에 이벤트 연결
+        self.send_sel_btn.clicked.connect(self.send_selected_osc)
+        self.send_all_btn.clicked.connect(self.send_all_osc)
+
         send_layout.addWidget(self.send_ip_label, 0, 0)
         send_layout.addWidget(self.send_ip_input, 0, 1)
         send_layout.addWidget(self.send_port_label, 0, 2)
@@ -213,13 +293,11 @@ class OSCMasterTool(QMainWindow):
         send_layout.addWidget(self.send_val_label, 1, 2)
         send_layout.addWidget(val_widget, 1, 3)
 
-        # 항목별 딜레이 입력 칸 추가
         send_layout.addWidget(self.item_delay_label, 2, 0)
         send_layout.addWidget(self.item_delay_input, 2, 1)
 
-        # 버튼 및 리스트 배치
         send_layout.addWidget(self.add_btn, 3, 0, 1, 4)
-        send_layout.addWidget(self.msg_list, 4, 0, 1, 4)
+        send_layout.addWidget(list_container, 4, 0, 1, 4)
 
         send_layout.addWidget(self.delete_sel_btn, 5, 0)
         send_layout.addWidget(self.clear_list_btn, 5, 1)
@@ -227,7 +305,10 @@ class OSCMasterTool(QMainWindow):
         send_layout.addWidget(self.load_list_btn, 5, 3)
 
         send_layout.addWidget(self.mode_combo, 6, 0, 1, 4)
-        send_layout.addWidget(self.send_all_btn, 7, 0, 1, 4)
+
+        # 두 개의 전송 버튼을 한 줄에 배치
+        send_layout.addWidget(self.send_sel_btn, 7, 0, 1, 2)
+        send_layout.addWidget(self.send_all_btn, 7, 2, 1, 2)
 
         self.send_group.setLayout(send_layout)
         main_layout.addWidget(self.send_group)
@@ -267,6 +348,26 @@ class OSCMasterTool(QMainWindow):
         self.log_group.setLayout(log_layout)
         main_layout.addWidget(self.log_group)
 
+    def move_item_up(self):
+        row = self.msg_list.currentRow()
+        if row > 0:
+            item = self.msg_list.takeItem(row)
+            self.msg_list.insertItem(row - 1, item)
+            self.msg_list.setCurrentRow(row - 1)
+
+    def move_item_down(self):
+        row = self.msg_list.currentRow()
+        if row >= 0 and row < self.msg_list.count() - 1:
+            item = self.msg_list.takeItem(row)
+            self.msg_list.insertItem(row + 1, item)
+            self.msg_list.setCurrentRow(row + 1)
+
+    def edit_list_item(self, item):
+        dialog = EditOscItemDialog(item.text(), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_text = dialog.get_result()
+            item.setText(new_text)
+
     def load_saved_values(self):
         self.send_ip_input.setText(self.config_manager.get("send_ip"))
         self.send_port_input.setText(self.config_manager.get("send_port"))
@@ -302,34 +403,42 @@ class OSCMasterTool(QMainWindow):
 
     def apply_language(self):
         lang = LANG[self.current_lang]
-        self.send_group.setTitle(lang["send"])
-        self.send_ip_label.setText(lang["ip"])
-        self.send_port_label.setText(lang["port"])
-        self.send_addr_label.setText(lang["address"])
-        self.send_val_label.setText(lang["value"])
+        self.send_group.setTitle(lang.get("send", "전송"))
+        self.send_ip_label.setText(lang.get("ip", "IP"))
+        self.send_port_label.setText(lang.get("port", "Port"))
+        self.send_addr_label.setText(lang.get("address", "주소"))
+        self.send_val_label.setText(lang.get("value", "값"))
 
-        # 언어 사전에 delay가 없다면 기본 영어를 사용하도록 처리
         self.item_delay_label.setText(lang.get("delay", "Delay (sec):"))
 
-        self.add_btn.setText(lang["add_list"])
-        self.delete_sel_btn.setText(lang["delete_selected"])
-        self.clear_list_btn.setText(lang["clear_list"])
-        self.save_list_btn.setText(lang["save_list"])
-        self.load_list_btn.setText(lang["load_list"])
+        self.add_btn.setText(lang.get("add_list", "추가"))
+        self.delete_sel_btn.setText(lang.get("delete_selected", "선택 삭제"))
+        self.clear_list_btn.setText(lang.get("clear_list", "전체 삭제"))
+        self.save_list_btn.setText(lang.get("save_list", "리스트 저장"))
+        self.load_list_btn.setText(lang.get("load_list", "리스트 불러오기"))
 
+        # 워커 동작 여부에 따른 텍스트 분기 처리
         if self.send_worker and self.send_worker.isRunning():
-            self.send_all_btn.setText(lang["stop_send"])
+            if self._active_send_btn == self.send_all_btn:
+                self.send_all_btn.setText(lang.get("stop_send", "중지"))
+                self.send_sel_btn.setText(
+                    lang.get("send_selected", "선택 전송" if self.current_lang == "ko" else "Send Selected"))
+            elif self._active_send_btn == self.send_sel_btn:
+                self.send_sel_btn.setText(lang.get("stop_send", "중지"))
+                self.send_all_btn.setText(lang.get("send_all", "전체 전송"))
         else:
-            self.send_all_btn.setText(lang["send_all"])
+            self.send_all_btn.setText(lang.get("send_all", "전체 전송"))
+            self.send_sel_btn.setText(
+                lang.get("send_selected", "선택 전송" if self.current_lang == "ko" else "Send Selected"))
 
-        self.recv_group.setTitle(lang["receive"])
-        self.recv_ip_label.setText(lang["ip"])
-        self.recv_port_label.setText(lang["port"])
-        self.recv_start_btn.setText(lang["start"])
-        self.recv_stop_btn.setText(lang["stop"])
+        self.recv_group.setTitle(lang.get("receive", "수신"))
+        self.recv_ip_label.setText(lang.get("ip", "IP"))
+        self.recv_port_label.setText(lang.get("port", "Port"))
+        self.recv_start_btn.setText(lang.get("start", "시작"))
+        self.recv_stop_btn.setText(lang.get("stop", "중지"))
 
-        self.log_group.setTitle(lang["log"])
-        self.clear_btn.setText(lang["clear"])
+        self.log_group.setTitle(lang.get("log", "로그"))
+        self.clear_btn.setText(lang.get("clear", "지우기"))
 
     def change_language(self, index):
         self.current_lang = "ko" if index == 0 else "en"
@@ -355,13 +464,12 @@ class OSCMasterTool(QMainWindow):
             QMessageBox.warning(self, "Warning", "IP, 포트, OSC 주소를 모두 입력해주세요.")
             return
 
-        # 리스트 아이템 텍스트의 끝에 딜레이(Delay) 값 추가
         self.add_item_to_widget(f"{ip}:{port} | {addr} | {val} | {vtype} | {delay_val}")
         self.save_current_values()
 
     def add_item_to_widget(self, text):
         item = QListWidgetItem(text)
-        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsDragEnabled)
         item.setCheckState(Qt.CheckState.Unchecked)
         self.msg_list.addItem(item)
 
@@ -380,7 +488,7 @@ class OSCMasterTool(QMainWindow):
             return val_str.lower() in ("true", "1", "t", "yes", "on")
         elif vtype == "str":
             return val_str
-        else:  # Auto
+        else:
             try:
                 if '.' in val_str:
                     return float(val_str)
@@ -389,7 +497,29 @@ class OSCMasterTool(QMainWindow):
             except ValueError:
                 return val_str
 
+    # --- 새롭게 추가/수정된 전송 기능 ---
+    def send_selected_osc(self):
+        """체크박스가 켜진 항목들만 전송합니다."""
+        if self.send_worker and self.send_worker.isRunning():
+            self.send_worker.stop()
+            return
+
+        count = self.msg_list.count()
+        if count == 0:
+            QMessageBox.warning(self, "Warning", "전송할 리스트가 비어있습니다.")
+            return
+
+        items = [self.msg_list.item(i).text() for i in range(count) if
+                 self.msg_list.item(i).checkState() == Qt.CheckState.Checked]
+
+        if not items:
+            QMessageBox.warning(self, "Warning", "선택된 항목이 없습니다. 리스트의 체크박스를 확인해주세요.")
+            return
+
+        self._execute_send(items, active_btn=self.send_sel_btn, inactive_btn=self.send_all_btn)
+
     def send_all_osc(self):
+        """리스트에 있는 모든 항목을 전송합니다."""
         if self.send_worker and self.send_worker.isRunning():
             self.send_worker.stop()
             return
@@ -400,19 +530,38 @@ class OSCMasterTool(QMainWindow):
             return
 
         items = [self.msg_list.item(i).text() for i in range(count)]
-        mode = "concurrent" if self.mode_combo.currentIndex() == 0 else "sequential"
 
-        # Worker에 mode를 넘겨 실행
+        self._execute_send(items, active_btn=self.send_all_btn, inactive_btn=self.send_sel_btn)
+
+    def _execute_send(self, items, active_btn, inactive_btn):
+        """전송 백그라운드 스레드를 초기화하고 실행하는 공통 함수"""
+        mode = "concurrent" if self.mode_combo.currentIndex() == 0 else "sequential"
         self.send_worker = OscSendWorker(self.osc_client, items, mode, self)
         self.send_worker.log_signal.connect(self.append_log)
         self.send_worker.finished_signal.connect(self.on_send_finished)
 
+        self._active_send_btn = active_btn
+        self._inactive_send_btn = inactive_btn
+
         self.send_worker.start()
-        self.send_all_btn.setText(LANG[self.current_lang]["stop_send"])
+
+        # UI 상태 업데이트 (누른 버튼은 '중지'로, 다른 버튼은 비활성화)
+        active_btn.setText(LANG[self.current_lang].get("stop_send", "중지"))
+        inactive_btn.setEnabled(False)
         self.set_ui_enabled_during_send(False)
 
     def on_send_finished(self):
-        self.send_all_btn.setText(LANG[self.current_lang]["send_all"])
+        lang = LANG[self.current_lang]
+        # 눌렸던 버튼 원래 텍스트 복구
+        if self._active_send_btn == self.send_all_btn:
+            self.send_all_btn.setText(lang.get("send_all", "전체 전송"))
+        elif self._active_send_btn == self.send_sel_btn:
+            self.send_sel_btn.setText(
+                lang.get("send_selected", "선택 전송" if self.current_lang == "ko" else "Send Selected"))
+
+        if self._inactive_send_btn:
+            self._inactive_send_btn.setEnabled(True)
+
         self.set_ui_enabled_during_send(True)
         self.save_current_values()
 
@@ -424,6 +573,10 @@ class OSCMasterTool(QMainWindow):
         self.load_list_btn.setEnabled(enabled)
         self.msg_list.setEnabled(enabled)
         self.mode_combo.setEnabled(enabled)
+        self.move_up_btn.setEnabled(enabled)
+        self.move_down_btn.setEnabled(enabled)
+
+    # --------------------------------
 
     def save_list_to_file(self):
         count = self.msg_list.count()
