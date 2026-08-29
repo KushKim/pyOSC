@@ -19,18 +19,17 @@ class OscSendWorker(QThread):
     log_signal = pyqtSignal(str)
     finished_signal = pyqtSignal()
 
-    def __init__(self, osc_client, items, mode, delay_sec, main_window):
+    def __init__(self, osc_client, items, mode, main_window):
         super().__init__()
         self.osc_client = osc_client
         self.items = items
         self.mode = mode  # "concurrent" 또는 "sequential"
-        self.delay_sec = delay_sec
         self.main_window = main_window
-        self.is_running = True  # 순차 전송 시 중지(Stop)를 위한 플래그
+        self.is_running = True
 
     def run(self):
         count = len(self.items)
-        mode_str = "동시 병렬 전송" if self.mode == "concurrent" else f"순차 전송 (Delay: {self.delay_sec}s)"
+        mode_str = "동시 병렬 전송" if self.mode == "concurrent" else "순차 전송 (개별 Delay 적용)"
         self.log_signal.emit(f"=== 시작: {count}개의 메시지 {mode_str} 준비 ===")
 
         # 1. 보낼 메시지들 파싱해서 타겟 리스트 생성
@@ -38,25 +37,35 @@ class OscSendWorker(QThread):
         for item_text in self.items:
             parts = item_text.split(" | ")
             try:
+                delay = 0.0  # 기본 딜레이
+
+                # 신규 포맷: IP:Port | 주소 | 값 | 타입 | 딜레이
                 if len(parts) >= 3 and ":" in parts[0]:
                     ip_port = parts[0]
                     addr = parts[1]
                     val_str = parts[2]
                     vtype = parts[3] if len(parts) > 3 else "Auto"
+                    delay_str = parts[4] if len(parts) > 4 else "0.0"
 
                     ip, port_str = ip_port.split(":")
                     port = int(port_str)
-                elif len(parts) >= 2:  # 호환성
+                    delay = float(delay_str)
+
+                # 하위 호환성: 주소 | 값 | 타입 | 딜레이(선택)
+                elif len(parts) >= 2:
                     ip = self.main_window.send_ip_input.text()
                     port = int(self.main_window.send_port_input.text())
                     addr = parts[0]
                     val_str = parts[1]
                     vtype = parts[2] if len(parts) > 2 else "Auto"
+                    delay_str = parts[3] if len(parts) > 3 else "0.0"
+                    delay = float(delay_str)
                 else:
                     continue
 
                 val = self.main_window.parse_value(val_str, vtype)
-                targets.append((ip, port, addr, val))
+                # target 데이터에 개별 딜레이(delay) 포함
+                targets.append((ip, port, addr, val, delay))
 
             except Exception as e:
                 self.log_signal.emit(f"[ERROR] 파싱 실패 ({item_text}): {str(e)}")
@@ -68,8 +77,10 @@ class OscSendWorker(QThread):
 
         # 2. 선택된 모드에 따라 전송 방식 분기
         if self.mode == "concurrent":
-            # 병렬로 한 번에 전송 (client.py의 send_concurrently 활용)
-            self.osc_client.send_concurrently(targets)
+            # 병렬 전송 시에는 딜레이를 제외한 앞의 4개 값만 추출해서 전달
+            osc_targets = [(t[0], t[1], t[2], t[3]) for t in targets]
+            self.osc_client.send_concurrently(osc_targets)
+
             for t in targets:
                 type_name = type(t[3]).__name__
                 self.log_signal.emit(f"[READY] {t[0]}:{t[1]} -> {t[2]} | {t[3]} ({type_name})")
@@ -82,18 +93,22 @@ class OscSendWorker(QThread):
                     self.log_signal.emit("=== 전송이 사용자에 의해 중지되었습니다 ===")
                     break
 
-                ip, port, addr, val = target
-                # 순차 전송 시에는 기존의 단일 전송 send() 함수 사용
+                ip, port, addr, val, item_delay = target
+
+                # 메시지 전송
                 self.osc_client.send(ip, port, addr, val)
 
                 type_name = type(val).__name__
-                self.log_signal.emit(f"[SEND {i + 1}/{len(targets)}] {ip}:{port} -> {addr} | {val} ({type_name})")
+                delay_msg = f" (Delay: {item_delay}s)" if item_delay > 0 else ""
+                self.log_signal.emit(
+                    f"[SEND {i + 1}/{len(targets)}] {ip}:{port} -> {addr} | {val} ({type_name}){delay_msg}")
 
-                # 지연 시간 동안 대기 (중지 명령을 즉각 감지하기 위해 잘게 쪼개서 sleep)
-                elapsed = 0.0
-                while elapsed < self.delay_sec and self.is_running:
-                    time.sleep(0.01)
-                    elapsed += 0.01
+                # 항목별 지정된 지연 시간(item_delay) 만큼 대기
+                if item_delay > 0:
+                    start_time = time.time()
+                    # 정밀한 대기 시간 계산 및 중지 명령 즉각 감지
+                    while (time.time() - start_time) < item_delay and self.is_running:
+                        time.sleep(0.01)
 
             if self.is_running:
                 self.log_signal.emit("=== 순차 전송 완료 ===")
@@ -122,7 +137,7 @@ class OSCMasterTool(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
-        self.resize(650, 750)  # 위젯이 추가되어 높이를 조금 더 늘림
+        self.resize(650, 750)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -142,10 +157,12 @@ class OSCMasterTool(QMainWindow):
         # 2. OSC 전송 그룹
         self.send_group = QGroupBox()
         send_layout = QGridLayout()
+
         self.send_ip_label = QLabel()
         self.send_ip_input = QLineEdit()
         self.send_port_label = QLabel()
         self.send_port_input = QLineEdit()
+
         self.send_addr_label = QLabel()
         self.send_addr_input = QLineEdit()
         self.send_val_label = QLabel()
@@ -161,6 +178,10 @@ class OSCMasterTool(QMainWindow):
         val_widget = QWidget()
         val_widget.setLayout(val_layout)
 
+        # 개별 딜레이 추가 UI
+        self.item_delay_label = QLabel("Delay (sec):")
+        self.item_delay_input = QLineEdit("0.0")
+
         self.add_btn = QPushButton()
         self.msg_list = QListWidget()
         self.msg_list.setFixedHeight(120)
@@ -169,27 +190,10 @@ class OSCMasterTool(QMainWindow):
         self.clear_list_btn = QPushButton()
         self.save_list_btn = QPushButton()
         self.load_list_btn = QPushButton()
-        self.send_all_btn = QPushButton()
 
-        # 전송 모드(동시/순차) 및 딜레이 설정 위젯 추가
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["동시 전송 (Concurrent)", "순차 전송 (Sequential)"])
-        self.mode_combo.currentIndexChanged.connect(self.on_mode_changed)
-
-        self.delay_label = QLabel("Delay (sec):")
-        self.delay_input = QLineEdit("0.05")
-        self.delay_input.setFixedWidth(50)
-        self.delay_input.setEnabled(False)  # 기본값(동시전송)일 땐 비활성화
-
-        mode_layout = QHBoxLayout()
-        mode_layout.addWidget(self.mode_combo)
-        mode_layout.addWidget(self.delay_label)
-        mode_layout.addWidget(self.delay_input)
-        mode_layout.addStretch()
-
-        mode_widget = QWidget()
-        mode_widget.setLayout(mode_layout)
-        mode_widget.setContentsMargins(0, 0, 0, 0)
+        self.send_all_btn = QPushButton()
 
         self.add_btn.clicked.connect(self.add_to_list)
         self.delete_sel_btn.clicked.connect(self.delete_selected)
@@ -198,26 +202,32 @@ class OSCMasterTool(QMainWindow):
         self.save_list_btn.clicked.connect(self.save_list_to_file)
         self.load_list_btn.clicked.connect(self.load_list_from_file)
 
+        # 레이아웃 배치 수정
         send_layout.addWidget(self.send_ip_label, 0, 0)
         send_layout.addWidget(self.send_ip_input, 0, 1)
         send_layout.addWidget(self.send_port_label, 0, 2)
         send_layout.addWidget(self.send_port_input, 0, 3)
+
         send_layout.addWidget(self.send_addr_label, 1, 0)
         send_layout.addWidget(self.send_addr_input, 1, 1)
         send_layout.addWidget(self.send_val_label, 1, 2)
         send_layout.addWidget(val_widget, 1, 3)
 
-        send_layout.addWidget(self.add_btn, 2, 0, 1, 4)
-        send_layout.addWidget(self.msg_list, 3, 0, 1, 4)
+        # 항목별 딜레이 입력 칸 추가
+        send_layout.addWidget(self.item_delay_label, 2, 0)
+        send_layout.addWidget(self.item_delay_input, 2, 1)
 
-        send_layout.addWidget(self.delete_sel_btn, 4, 0)
-        send_layout.addWidget(self.clear_list_btn, 4, 1)
-        send_layout.addWidget(self.save_list_btn, 4, 2)
-        send_layout.addWidget(self.load_list_btn, 4, 3)
+        # 버튼 및 리스트 배치
+        send_layout.addWidget(self.add_btn, 3, 0, 1, 4)
+        send_layout.addWidget(self.msg_list, 4, 0, 1, 4)
 
-        # 모드 선택을 5행에 추가, 전송 버튼을 6행에 배치
-        send_layout.addWidget(mode_widget, 5, 0, 1, 4)
-        send_layout.addWidget(self.send_all_btn, 6, 0, 1, 4)
+        send_layout.addWidget(self.delete_sel_btn, 5, 0)
+        send_layout.addWidget(self.clear_list_btn, 5, 1)
+        send_layout.addWidget(self.save_list_btn, 5, 2)
+        send_layout.addWidget(self.load_list_btn, 5, 3)
+
+        send_layout.addWidget(self.mode_combo, 6, 0, 1, 4)
+        send_layout.addWidget(self.send_all_btn, 7, 0, 1, 4)
 
         self.send_group.setLayout(send_layout)
         main_layout.addWidget(self.send_group)
@@ -257,13 +267,6 @@ class OSCMasterTool(QMainWindow):
         self.log_group.setLayout(log_layout)
         main_layout.addWidget(self.log_group)
 
-    def on_mode_changed(self, index):
-        """순차 전송(인덱스 1)일 때만 딜레이 입력칸을 활성화합니다."""
-        if index == 1:
-            self.delay_input.setEnabled(True)
-        else:
-            self.delay_input.setEnabled(False)
-
     def load_saved_values(self):
         self.send_ip_input.setText(self.config_manager.get("send_ip"))
         self.send_port_input.setText(self.config_manager.get("send_port"))
@@ -282,7 +285,7 @@ class OSCMasterTool(QMainWindow):
 
         saved_delay = self.config_manager.get("send_delay")
         if saved_delay:
-            self.delay_input.setText(saved_delay)
+            self.item_delay_input.setText(saved_delay)
 
     def save_current_values(self):
         self.config_manager.set("send_ip", self.send_ip_input.text())
@@ -295,7 +298,7 @@ class OSCMasterTool(QMainWindow):
 
         mode_val = "sequential" if self.mode_combo.currentIndex() == 1 else "concurrent"
         self.config_manager.set("send_mode", mode_val)
-        self.config_manager.set("send_delay", self.delay_input.text())
+        self.config_manager.set("send_delay", self.item_delay_input.text())
 
     def apply_language(self):
         lang = LANG[self.current_lang]
@@ -304,6 +307,9 @@ class OSCMasterTool(QMainWindow):
         self.send_port_label.setText(lang["port"])
         self.send_addr_label.setText(lang["address"])
         self.send_val_label.setText(lang["value"])
+
+        # 언어 사전에 delay가 없다면 기본 영어를 사용하도록 처리
+        self.item_delay_label.setText(lang.get("delay", "Delay (sec):"))
 
         self.add_btn.setText(lang["add_list"])
         self.delete_sel_btn.setText(lang["delete_selected"])
@@ -337,11 +343,20 @@ class OSCMasterTool(QMainWindow):
         val = self.send_val_input.text().strip()
         vtype = self.send_type_combo.currentText()
 
+        delay_text = self.item_delay_input.text().strip()
+        try:
+            delay_val = float(delay_text)
+            if delay_val < 0: raise ValueError
+        except ValueError:
+            QMessageBox.warning(self, "Warning", "Delay는 0 이상의 숫자여야 합니다.")
+            return
+
         if not ip or not port or not addr:
             QMessageBox.warning(self, "Warning", "IP, 포트, OSC 주소를 모두 입력해주세요.")
             return
 
-        self.add_item_to_widget(f"{ip}:{port} | {addr} | {val} | {vtype}")
+        # 리스트 아이템 텍스트의 끝에 딜레이(Delay) 값 추가
+        self.add_item_to_widget(f"{ip}:{port} | {addr} | {val} | {vtype} | {delay_val}")
         self.save_current_values()
 
     def add_item_to_widget(self, text):
@@ -375,7 +390,6 @@ class OSCMasterTool(QMainWindow):
                 return val_str
 
     def send_all_osc(self):
-        # 만약 이미 스레드가 실행 중이라면 '중지' 명령
         if self.send_worker and self.send_worker.isRunning():
             self.send_worker.stop()
             return
@@ -386,18 +400,10 @@ class OSCMasterTool(QMainWindow):
             return
 
         items = [self.msg_list.item(i).text() for i in range(count)]
-
-        # UI에서 선택한 모드 및 딜레이 값 가져오기
         mode = "concurrent" if self.mode_combo.currentIndex() == 0 else "sequential"
-        try:
-            delay_sec = float(self.delay_input.text())
-            if delay_sec < 0: raise ValueError
-        except ValueError:
-            delay_sec = 0.05
-            self.delay_input.setText("0.05")
 
-        # 스레드 생성 시 모드와 딜레이를 함께 넘겨줌
-        self.send_worker = OscSendWorker(self.osc_client, items, mode, delay_sec, self)
+        # Worker에 mode를 넘겨 실행
+        self.send_worker = OscSendWorker(self.osc_client, items, mode, self)
         self.send_worker.log_signal.connect(self.append_log)
         self.send_worker.finished_signal.connect(self.on_send_finished)
 
@@ -418,8 +424,6 @@ class OSCMasterTool(QMainWindow):
         self.load_list_btn.setEnabled(enabled)
         self.msg_list.setEnabled(enabled)
         self.mode_combo.setEnabled(enabled)
-        if self.mode_combo.currentIndex() == 1:
-            self.delay_input.setEnabled(enabled)
 
     def save_list_to_file(self):
         count = self.msg_list.count()
