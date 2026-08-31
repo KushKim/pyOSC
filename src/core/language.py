@@ -1,13 +1,13 @@
 # src/core/language.py
 LANG = {
     "ko": {
-        # UI 텍스트
         "send": "OSC 전송 (Send)",
         "receive": "OSC 수신 (Receive)",
         "ip": "IP 주소",
         "port": "포트",
         "address": "OSC 주소",
         "value": "값",
+        "tag": "태그 (이름)",
         "start": "서버 시작",
         "stop": "서버 정지",
         "log": "통신 로그",
@@ -22,7 +22,6 @@ LANG = {
         "save_list": "리스트 저장",
         "load_list": "리스트 불러오기",
 
-        # 로그 & 팝업 메시지
         "msg_concurrent_ready": "=== 시작: {count}개의 메시지 동시 병렬 전송 준비 ===",
         "msg_sequential_ready": "=== 시작: {count}개의 메시지 순차 전송 (개별 Delay 적용) 준비 ===",
         "msg_no_targets": "=== 전송할 유효한 대상이 없습니다 ===",
@@ -39,13 +38,13 @@ LANG = {
         "warn_no_save_list": "저장할 리스트가 없습니다."
     },
     "en": {
-        # UI Text
         "send": "OSC Send",
         "receive": "OSC Receive",
         "ip": "IP Address",
         "port": "Port",
         "address": "OSC Address",
         "value": "Value",
+        "tag": "Tag (Name)",
         "start": "Start Server",
         "stop": "Stop Server",
         "log": "Communication Log",
@@ -60,7 +59,6 @@ LANG = {
         "save_list": "Save List",
         "load_list": "Load List",
 
-        # Log & Popup Messages
         "msg_concurrent_ready": "=== Start: Preparing {count} messages for concurrent transmission ===",
         "msg_sequential_ready": "=== Start: Preparing {count} messages for sequential transmission ===",
         "msg_no_targets": "=== No valid targets to send ===",

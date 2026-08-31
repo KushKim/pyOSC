@@ -8,5 +8,6 @@
     "recv_port": "6666",
     "send_type": "float",
     "send_delay": "0",
-    "send_mode": "sequential"
+    "send_mode": "sequential",
+    "send_tag": "ㄴㅇㄹㄴㅇ"
 }
