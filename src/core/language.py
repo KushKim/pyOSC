@@ -1,6 +1,7 @@
 # src/core/language.py
 LANG = {
     "ko": {
+        # UI 텍스트
         "send": "OSC 전송 (Send)",
         "receive": "OSC 수신 (Receive)",
         "ip": "IP 주소",
@@ -12,15 +13,33 @@ LANG = {
         "log": "통신 로그",
         "clear": "로그 지우기",
         "add_list": "리스트에 추가",
-        "send_all": "리스트 전송",
+        "send_all": "전체 전송",
+        "send_selected": "선택 전송",
         "clear_list": "전체 지우기",
         "delete_selected": "선택 지우기",
         "delay": "지연(초)",
         "stop_send": "전송 중지",
         "save_list": "리스트 저장",
-        "load_list": "리스트 불러오기"
+        "load_list": "리스트 불러오기",
+
+        # 로그 & 팝업 메시지
+        "msg_concurrent_ready": "=== 시작: {count}개의 메시지 동시 병렬 전송 준비 ===",
+        "msg_sequential_ready": "=== 시작: {count}개의 메시지 순차 전송 (개별 Delay 적용) 준비 ===",
+        "msg_no_targets": "=== 전송할 유효한 대상이 없습니다 ===",
+        "msg_concurrent_done": "=== {count}개의 타겟으로 동시 전송 명령 완료 ===",
+        "msg_stopped": "=== 전송이 사용자에 의해 중지되었습니다 ===",
+        "msg_seq_done": "=== 전송 완료 ===",
+        "err_parse": "[ERROR] 파싱 실패 ({item}): {error}",
+        "sys_save_success": "[SYSTEM] 리스트가 성공적으로 저장되었습니다: {path}",
+        "sys_load_success": "[SYSTEM] 리스트를 성공적으로 불러왔습니다: {path}",
+        "warn_delay_invalid": "Delay는 0 이상의 숫자여야 합니다.",
+        "warn_input_empty": "IP, 포트, OSC 주소를 모두 입력해주세요.",
+        "warn_list_empty": "전송할 리스트가 비어있습니다.",
+        "warn_no_selected": "선택된 항목이 없습니다. 리스트의 체크박스를 확인해주세요.",
+        "warn_no_save_list": "저장할 리스트가 없습니다."
     },
     "en": {
+        # UI Text
         "send": "OSC Send",
         "receive": "OSC Receive",
         "ip": "IP Address",
@@ -33,11 +52,28 @@ LANG = {
         "clear": "Clear Log",
         "add_list": "Add to List",
         "send_all": "Send All",
+        "send_selected": "Send Selected",
         "clear_list": "Clear All",
         "delete_selected": "Delete Selected",
         "delay": "Delay(s)",
         "stop_send": "Stop Sending",
         "save_list": "Save List",
-        "load_list": "Load List"
+        "load_list": "Load List",
+
+        # Log & Popup Messages
+        "msg_concurrent_ready": "=== Start: Preparing {count} messages for concurrent transmission ===",
+        "msg_sequential_ready": "=== Start: Preparing {count} messages for sequential transmission ===",
+        "msg_no_targets": "=== No valid targets to send ===",
+        "msg_concurrent_done": "=== Concurrent transmission command sent to {count} targets ===",
+        "msg_stopped": "=== Transmission stopped by user ===",
+        "msg_seq_done": "=== Transmission Complete ===",
+        "err_parse": "[ERROR] Parsing failed ({item}): {error}",
+        "sys_save_success": "[SYSTEM] List successfully saved: {path}",
+        "sys_load_success": "[SYSTEM] List successfully loaded: {path}",
+        "warn_delay_invalid": "Delay must be a number greater than or equal to 0.",
+        "warn_input_empty": "Please enter IP, Port, and OSC Address.",
+        "warn_list_empty": "The send list is empty.",
+        "warn_no_selected": "No items selected. Please check the checkboxes.",
+        "warn_no_save_list": "No list to save."
     }
 }
