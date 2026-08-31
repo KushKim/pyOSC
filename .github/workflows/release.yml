@@ -30,26 +30,50 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Build with PyInstaller
-      run: pyinstaller build.spec
-
+    # 1. 빌드하기 전에 태그 버전을 먼저 가져옵니다. (v를 제외한 숫자만 추출)
     - name: Get Version
       id: version
       shell: bash
       run: |
-        # 태그 푸시인 경우 'v1.2.0' 같은 태그명을 추출, 아니면 'dev'로 설정
         if [[ $GITHUB_REF == refs/tags/* ]]; then
-          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          TAG=${GITHUB_REF#refs/tags/}
+          CLEAN_VERSION=${TAG#v} 
+          echo "VERSION=$CLEAN_VERSION" >> $GITHUB_ENV
         else
           echo "VERSION=dev" >> $GITHUB_ENV
         fi
+
+    # 2. 파이썬 코드를 이용해 version.py 파일 안의 VERSION 값을 깃허브 태그로 자동 수정합니다.
+    - name: Sync Version in Code
+      shell: python
+      run: |
+        import os
+        import re
+        
+        # version.py 경로 탐색 (src 폴더 안에 있는지, 최상단에 있는지 확인)
+        file_path = 'src/version.py' if os.path.exists('src/version.py') else 'version.py'
+        new_version = os.environ.get('VERSION', 'dev')
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        # 정규식을 이용해 VERSION = "..." 부분을 새 버전으로 교체
+        new_content = re.sub(r'VERSION\s*=\s*".*"', f'VERSION = "{new_version}"', content)
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+            
+        print(f"Successfully updated {file_path} to VERSION = {new_version}")
+
+    # 3. 이제 업데이트된 version.py를 바탕으로 PyInstaller 빌드를 진행합니다.
+    - name: Build with PyInstaller
+      run: pyinstaller build.spec
 
     - name: Prepare Artifacts (Windows)
       if: matrix.os == 'windows-latest'
       shell: bash
       run: |
         mkdir -p release_assets
-        # 파일명에 ${{ env.VERSION }} 변수를 삽입합니다
         cp dist/OSC_Master_Tool.exe release_assets/OSC_Master_Tool_${{ env.VERSION }}_Windows.exe
 
     - name: Prepare Artifacts (macOS)
@@ -58,7 +82,6 @@ jobs:
       run: |
         mkdir -p release_assets
         cd dist
-        # 파일명에 ${{ env.VERSION }} 변수를 삽입합니다
         zip -r ../release_assets/OSC_Master_Tool_${{ env.VERSION }}_macOS.zip OSC_Master_Tool.app
 
     - name: Upload Artifacts
