@@ -1,5 +1,5 @@
 APP_NAME = "OSC Master Tool"
-VERSION = "1.2.4"
+VERSION = "1.2.0"
 AUTHOR = "KushKim"
 COPYRIGHT = "© 2026 KushKim"
 
